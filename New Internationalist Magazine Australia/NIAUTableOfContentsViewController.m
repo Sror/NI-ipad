@@ -9,7 +9,9 @@
 #import "NIAUTableOfContentsViewController.h"
 #import "NIAUImageZoomViewController.h"
 
-@interface NIAUTableOfContentsViewController ()
+@interface NIAUTableOfContentsViewController () {
+    BOOL isSearching;
+}
 
 @end
 
@@ -46,10 +48,12 @@ static NSString *CellIdentifier = @"articleCell";
     self.editorsLetterTextView.scrollsToTop = NO;
     
     [self.issue requestArticles];
+    isSearching = NO;
 }
 
 -(void)publisherReady:(NSNotification *)not
 {
+    [self setupSearch];
     [self showArticles];
 }
 
@@ -95,7 +99,12 @@ static NSString *CellIdentifier = @"articleCell";
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    return [self.issue numberOfArticles];
+    
+    if (isSearching) {
+        return [self.filteredArticlesArray count];
+    } else {
+        return [self.issue numberOfArticles];
+    }
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForHeightForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -147,18 +156,20 @@ static NSString *CellIdentifier = @"articleCell";
 
 - (void)setupCellForHeight: (UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath {
 
-    id teaser = [self.issue articleAtIndex:indexPath.row].teaser;
+    NIAUArticle *article = [self articleForCellAtIndexPath:indexPath];
+    
+    id teaser = article.teaser;
     teaser = (teaser==[NSNull null]) ? @"" : teaser;
     
     UIImageView *articleImageView = (UIImageView *)[cell viewWithTag:100];
     articleImageView.image = nil;
     // Set background colour to the category colour.
-    NSDictionary *firstCategory = [self.issue articleAtIndex:indexPath.row].categories.firstObject;
+    NSDictionary *firstCategory = article.categories.firstObject;
     id categoryColour = WITH_DEFAULT([firstCategory objectForKey:@"colour"],[NSNumber numberWithInt:0xFFFFFF]);
     articleImageView.backgroundColor = UIColorFromRGB([categoryColour integerValue]);
     
     UILabel *articleTitle = (UILabel *)[cell viewWithTag:101];
-    articleTitle.text = [self.issue articleAtIndex:indexPath.row].title;
+    articleTitle.text = article.title;
     articleTitle.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
     
     UILabel *articleTeaser = (UILabel *)[cell viewWithTag:102];
@@ -186,7 +197,9 @@ static NSString *CellIdentifier = @"articleCell";
 - (void)setupCell: (UITableViewCell *)cell atIndexPath:(NSIndexPath *)indexPath {
 
     UIImageView *articleImageView = (UIImageView *)[cell viewWithTag:100];
-    NIAUArticle *article = [self.issue articleAtIndex:indexPath.row];
+    
+    NIAUArticle *article = [self articleForCellAtIndexPath:indexPath];
+    
     CGSize thumbSize = CGSizeMake(57,43);
     if (self.tableView.dragging == NO && self.tableView.decelerating == NO) {
         if (articleImageView.image == nil) {
@@ -237,6 +250,75 @@ static NSString *CellIdentifier = @"articleCell";
     [self loadImagesForOnscreenRows];
 }
 
+#pragma mark -
+#pragma mark Search
+
+- (void)setupSearch
+{
+    // Initialize array of all articles for this issue
+    NSMutableArray *allArticles = [NSMutableArray arrayWithCapacity:[self.issue numberOfArticles]];
+    for (int i = 0; i < [self.issue numberOfArticles]; i++) {
+        [allArticles addObject:[self.issue articleAtIndex:i]];
+    }
+    self.articles = allArticles;
+    
+    // Initialize the filteredArticlesArray with a capacity equal to the number of articles
+    self.filteredArticlesArray = [NSMutableArray arrayWithCapacity:[self.issue numberOfArticles]];
+}
+
+-(void)filterContentForSearchText:(NSString *)searchText scope:(NSString *)scope {
+    // Update the filtered array based on the search text and scope.
+    // Remove all objects from the filtered search array
+    [self.filteredArticlesArray removeAllObjects];
+    // Filter the array using NSPredicate
+    NSPredicate *predicate = [NSPredicate predicateWithFormat:@"SELF.title contains[c] %@",searchText];
+    self.filteredArticlesArray = [NSMutableArray arrayWithArray:[self.articles filteredArrayUsingPredicate:predicate]];
+}
+
+- (NIAUArticle *)articleForCellAtIndexPath:(NSIndexPath *)indexPath
+{
+    if (isSearching) {
+        NSLog(@"Search array at index: %ld \nTitle: %@", (long)indexPath.row, [[self.filteredArticlesArray objectAtIndex:indexPath.row] title]);
+        return [self.filteredArticlesArray objectAtIndex:indexPath.row];
+    } else {
+        return [self.issue articleAtIndex:indexPath.row];
+    }
+}
+
+-(void)searchDisplayController:(UISearchDisplayController *)controller didShowSearchResultsTableView:(UITableView *)tableView
+{
+    tableView.frame = self.tableView.frame;
+    isSearching = YES;
+}
+
+-(void)searchDisplayController:(UISearchDisplayController *)controller willUnloadSearchResultsTableView:(UITableView *)tableView
+{
+    isSearching = NO;
+}
+
+-(void)searchDisplayController:(UISearchDisplayController *)controller didHideSearchResultsTableView:(UITableView *)tableView
+{
+    isSearching = NO;
+    [self.tableView reloadData];
+}
+
+#pragma mark - UISearchDisplayController Delegate Methods
+
+-(BOOL)searchDisplayController:(UISearchDisplayController *)controller shouldReloadTableForSearchString:(NSString *)searchString {
+    // Tells the table data source to reload when text changes
+    [self filterContentForSearchText:searchString scope:
+     [[self.searchDisplayController.searchBar scopeButtonTitles] objectAtIndex:[self.searchDisplayController.searchBar selectedScopeButtonIndex]]];
+    // Return YES to cause the search result table view to be reloaded.
+    return YES;
+}
+
+-(BOOL)searchDisplayController:(UISearchDisplayController *)controller shouldReloadTableForSearchScope:(NSInteger)searchOption {
+    // Tells the table data source to reload when scope bar selection changes
+    [self filterContentForSearchText:self.searchDisplayController.searchBar.text scope:
+     [[self.searchDisplayController.searchBar scopeButtonTitles] objectAtIndex:searchOption]];
+    // Return YES to cause the search result table view to be reloaded.
+    return YES;
+}
 
 #pragma mark -
 #pragma mark Setup Data
@@ -322,11 +404,18 @@ static NSString *CellIdentifier = @"articleCell";
     {
         // Load the article tapped.
         
-        NSIndexPath *selectedIndexPath = [self.tableView indexPathForSelectedRow];
+        NSIndexPath *selectedIndexPath = nil;
+        
+        if (isSearching) {
+            selectedIndexPath = [self.searchDisplayController.searchResultsTableView indexPathForSelectedRow];
+        } else {
+            selectedIndexPath = [self.tableView indexPathForSelectedRow];
+        }
         
         NIAUArticleViewController *articleViewController = [segue destinationViewController];
-        articleViewController.article = [self.issue articleAtIndex:selectedIndexPath.row];
+        articleViewController.article = [self articleForCellAtIndexPath:selectedIndexPath];
         
+        isSearching = NO;
     }
 }
 

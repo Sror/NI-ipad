@@ -11,11 +11,17 @@
 #import "NIAUArticleViewController.h"
 #import "NIAUPublisher.h"
 
-@interface NIAUTableOfContentsViewController : UIViewController <UIScrollViewDelegate>
+@interface NIAUTableOfContentsViewController : UIViewController <UIScrollViewDelegate, UISearchBarDelegate, UISearchDisplayDelegate>
 
 @property (nonatomic, strong) NIAUIssue *issue;
 
 @property (nonatomic, strong) UIImage *cover;
+
+// Search
+
+@property (strong, nonatomic) NSArray *articles;
+@property (strong,nonatomic) NSMutableArray *filteredArticlesArray;
+@property IBOutlet UISearchBar *articleSearchBar;
 
 @property (nonatomic, strong) IBOutlet UITableView *tableView;
 @property (nonatomic, strong) NSMutableDictionary *cellDictionary;
